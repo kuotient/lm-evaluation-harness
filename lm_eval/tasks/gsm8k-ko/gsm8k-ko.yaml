@@ -2,7 +2,6 @@ group:
   - math_word_problems
 task: gsm8k-ko
 dataset_path: kuotient/gsm8k-ko
-dataset_name: main
 output_type: generate_until
 training_split: train
 fewshot_split: train
