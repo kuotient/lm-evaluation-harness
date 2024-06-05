@@ -1,0 +1,20 @@
+group:
+  - allganize
+task: allganize_fmmlu
+dataset_path: allganize/mmlu-finance-ko-formatted
+test_split: test
+output_type: multiple_choice
+doc_to_text: "{{question.strip()}}\nA. {{choices[0]}}\nB. {{choices[1]}}\nC. {{choices[2]}}\nD. {{choices[3]}}\정답:"
+doc_to_choice: ["A", "B", "C", "D"]
+doc_to_target: {{answer-1}}
+metric_list:
+  - metric: acc
+    aggregation: mean
+    higher_is_better: true
+  - metric: f1
+    aggregation: !function utils.macro_f1_score
+    average: macro
+    hf_evaluate: true
+    higher_is_better: true
+metadata:
+  version: 2.0
