@@ -1,11 +1,14 @@
 import collections
 import fnmatch
 import functools
+import hashlib
 import importlib.util
 import inspect
+import json
 import logging
 import os
 import re
+from dataclasses import asdict, is_dataclass
 from itertools import islice
 from typing import Any, Callable, List
 
@@ -22,6 +25,15 @@ logging.basicConfig(
 eval_logger = logging.getLogger("lm-eval")
 
 SPACING = " " * 47
+
+HIGHER_IS_BETTER_SYMBOLS = {
+    True: "↑",
+    False: "↓",
+}
+
+
+def hash_string(string: str) -> str:
+    return hashlib.sha256(string.encode("utf-8")).hexdigest()
 
 
 def escaped_split(text, sep_char, maxsplit=-1):
@@ -58,6 +70,27 @@ def handle_arg_string(arg):
         return float(arg)
     except ValueError:
         return arg
+
+
+def handle_non_serializable(o):
+    if isinstance(o, np.int64) or isinstance(o, np.int32):
+        return int(o)
+    elif isinstance(o, set):
+        return list(o)
+    else:
+        return str(o)
+
+
+def sanitize_list(sub):
+    """
+    Takes possible nested list and recursively converts all inner component to strings
+    """
+    if isinstance(sub, list):
+        return [sanitize_list(item) for item in sub]
+    if isinstance(sub, tuple):
+        return tuple(sanitize_list(item) for item in sub)
+    else:
+        return str(sub)
 
 
 def simple_parse_args_string(args_string):
@@ -166,6 +199,18 @@ def make_disjoint_window(pair):
     return a[: len(a) - (len(b) - 1)], b
 
 
+class EnhancedJSONEncoder(json.JSONEncoder):
+    """
+    Provides a proper json encoding for the loggers and trackers json dumps.
+    Notably manages the json encoding of dataclasses.
+    """
+
+    def default(self, o):
+        if is_dataclass(o):
+            return asdict(o)
+        return super().default(o)
+
+
 class Reorderer:
     def __init__(self, arr: List[Any], fn: Callable) -> None:
         """Reorder an array according to some function
@@ -214,7 +259,7 @@ class Reorderer:
         return res
 
 
-def make_table(result_dict, column: str = "results"):
+def make_table(result_dict, column: str = "results", sort_results: bool = True):
     """Generate table of results."""
     from pytablewriter import LatexTableWriter, MarkdownTableWriter
 
@@ -229,6 +274,7 @@ def make_table(result_dict, column: str = "results"):
         "Filter",
         "n-shot",
         "Metric",
+        "",
         "Value",
         "",
         "Stderr",
@@ -241,9 +287,15 @@ def make_table(result_dict, column: str = "results"):
 
     values = []
 
-    for k, dic in result_dict[column].items():
+    keys = result_dict[column].keys()
+    if sort_results:
+        # sort entries alphabetically
+        keys = sorted(keys)
+    for k in keys:
+        dic = result_dict[column][k]
         version = result_dict["versions"].get(k, "N/A")
         n = str(result_dict["n-shot"][k])
+        higher_is_better = result_dict.get("higher_is_better", {}).get(k, {})
 
         if "alias" in dic:
             k = dic.pop("alias")
@@ -253,13 +305,15 @@ def make_table(result_dict, column: str = "results"):
             if m.endswith("_stderr"):
                 continue
 
+            hib = HIGHER_IS_BETTER_SYMBOLS.get(higher_is_better.get(m), "")
+
             if m + "_stderr" + "," + f in dic:
                 se = dic[m + "_stderr" + "," + f]
                 if se != "N/A":
                     se = "%.4f" % se
-                values.append([k, version, f, n, m, "%.4f" % v, "±", se])
+                values.append([k, version, f, n, m, hib, "%.4f" % v, "±", se])
             else:
-                values.append([k, version, f, n, m, "%.4f" % v, "", ""])
+                values.append([k, version, f, n, m, hib, "%.4f" % v, "", ""])
             k = ""
             version = ""
     md_writer.value_matrix = values
